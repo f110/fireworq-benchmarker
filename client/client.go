@@ -31,6 +31,11 @@ type Queue struct {
 	MaxWorkers      int `json:"max_workers"`
 }
 
+type Routing struct {
+	QueueName   string `json:"queue_name"`
+	JobCategory string `json:"job_category,omitempty"`
+}
+
 func New(host string) *Client {
 	u, err := url.Parse(fmt.Sprintf("http://%s", host))
 	if err != nil {
@@ -40,7 +45,7 @@ func New(host string) *Client {
 	return &Client{Host: host, url: u}
 }
 
-func (c *Client) CreateJob(name string, maxWorkers int) error {
+func (c *Client) CreateJobIfNotExist(name string, maxWorkers int) error {
 	c.url.Path = fmt.Sprintf("/queue/%s", name)
 	req, err := http.NewRequest(http.MethodGet, c.url.String(), nil)
 	if err != nil {
@@ -58,46 +63,50 @@ func (c *Client) CreateJob(name string, maxWorkers int) error {
 		}
 	}
 
+	c.url.Path = fmt.Sprintf("/routing/%s", name)
+	req, err = http.NewRequest(http.MethodGet, c.url.String(), nil)
+	if err != nil {
+		return err
+	}
+	res, err = http.DefaultClient.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound {
+		if err := c.createRouting(name); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
 func (c *Client) Enqueue(name string, j *Job) (*Job, error) {
-	c.url.Path = fmt.Sprintf("/job/%s", name)
-
-	var buf bytes.Buffer
-	e := json.NewEncoder(&buf)
-	if err := e.Encode(j); err != nil {
+	var result Job
+	if err := c.call(http.MethodPost, fmt.Sprintf("/job/%s", name), j, &result); err != nil {
 		return nil, err
 	}
-
-	req, err := http.NewRequest(http.MethodPost, c.url.String(), &buf)
-	if err != nil {
-		return nil, err
-	}
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer res.Body.Close()
-
-	var enqueuedJob Job
-	d := json.NewDecoder(res.Body)
-	if err := d.Decode(&enqueuedJob); err != nil {
-		return nil, err
-	}
-
-	return &enqueuedJob, nil
+	return &result, nil
 }
 
 func (c *Client) createQueue(name string, q *Queue) error {
-	c.url.Path = fmt.Sprintf("/queue/%s", name)
+	return c.call(http.MethodPut, fmt.Sprintf("/queue/%s", name), q, &Queue{})
+}
+
+func (c *Client) createRouting(name string) error {
+	return c.call(http.MethodPut, fmt.Sprintf("/routing/%s", name), &Routing{QueueName: name}, &Routing{})
+}
+
+func (c *Client) call(method string, path string, body interface{}, result interface{}) error {
+	c.url.Path = path
 
 	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(q); err != nil {
+	if err := json.NewEncoder(&buf).Encode(body); err != nil {
 		return err
 	}
 
-	req, err := http.NewRequest(http.MethodPut, c.url.String(), &buf)
+	req, err := http.NewRequest(method, c.url.String(), &buf)
 	if err != nil {
 		return err
 	}
@@ -111,7 +120,9 @@ func (c *Client) createQueue(name string, q *Queue) error {
 		return errors.New("failed create queue")
 	}
 
+	if err := json.NewDecoder(res.Body).Decode(result); err != nil {
+		return err
+	}
+
 	return nil
 }
-
-func (c *Client) createRouting(name string) {}

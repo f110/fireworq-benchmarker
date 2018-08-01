@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"math/rand"
 	"net"
 	"net/http"
 )
@@ -20,7 +21,7 @@ type JobResult struct {
 }
 
 type Payload struct {
-	Id int
+	Id int `json:"id"`
 }
 
 type Worker struct {
@@ -29,6 +30,8 @@ type Worker struct {
 	mux      *http.ServeMux
 	listener net.Listener
 	server   *http.Server
+
+	results chan int
 }
 
 func New() (*Worker, error) {
@@ -41,10 +44,12 @@ func New() (*Worker, error) {
 		Addr:     listener.Addr().String(),
 		listener: listener,
 		mux:      http.NewServeMux(),
+		results:  make(chan int, 0),
 	}, nil
 }
 
 func (worker *Worker) Start() error {
+	log.Printf("Start worker: %s", worker.Addr)
 	s := &http.Server{
 		Handler: worker,
 	}
@@ -55,6 +60,10 @@ func (worker *Worker) Start() error {
 
 func (worker *Worker) Stop(ctx context.Context) error {
 	return worker.server.Shutdown(ctx)
+}
+
+func (worker *Worker) ArrivedJobs() chan int {
+	return worker.results
 }
 
 func (worker *Worker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -69,13 +78,18 @@ func (worker *Worker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		goto WriteResponse
 	}
 
+	if r := rand.Intn(100); r < 10 {
+		result.Status = StatusFailure
+		result.Message = "random failure"
+		goto WriteResponse
+	}
+
 WriteResponse:
 	switch result.Status {
 	case StatusSuccess:
-		w.WriteHeader(http.StatusOK)
-	case StatusFailure, StatusPermanentFailure:
-		w.WriteHeader(http.StatusInternalServerError)
+		worker.results <- payload.Id
 	}
+	w.WriteHeader(http.StatusOK)
 	e := json.NewEncoder(w)
 	if err := e.Encode(&result); err != nil {
 		log.Print(err)
