@@ -53,19 +53,24 @@ func main() {
 		mpb.BarClearOnComplete(),
 		mpb.PrependDecorators(
 			decor.Name("Enqueue", decor.WCSyncSpaceR),
-			decor.OnComplete(decor.CountersNoUnit("%d / %d", decor.WCSyncWidth), "done"),
+			decor.OnComplete(decor.CountersNoUnit("%d / %d", decor.WCSyncWidth), "done!"),
+			decor.OnComplete(decor.Percentage(decor.WCSyncSpace), ""),
 		),
 		mpb.AppendDecorators(
-			decor.OnComplete(decor.Percentage(decor.WCSyncSpace), "")),
+
+			decor.OnComplete(decor.AverageSpeed(0, "%.1f qps", decor.WCSyncSpace), ""),
+		),
 	)
 	workerBar := p.AddBar(int64(*NumberOfQueue),
 		mpb.BarClearOnComplete(),
 		mpb.PrependDecorators(
 			decor.Name("Worker", decor.WCSyncSpaceR),
-			decor.OnComplete(decor.CountersNoUnit("%d / %d", decor.WCSyncWidth), "done"),
+			decor.OnComplete(decor.CountersNoUnit("%d / %d", decor.WCSyncWidth), "done!"),
+			decor.OnComplete(decor.Percentage(decor.WCSyncSpace), ""),
 		),
 		mpb.AppendDecorators(
-			decor.OnComplete(decor.Percentage(decor.WCSyncSpace), "")),
+			decor.OnComplete(decor.AverageSpeed(0, "%.1f qps", decor.WCSyncSpace), ""),
+		),
 	)
 	perWorker := *NumberOfQueue / *Concurrent
 	result := make(chan []int, *Concurrent)
