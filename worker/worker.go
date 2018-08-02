@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net"
 	"net/http"
+	"sync"
 )
 
 const (
@@ -24,32 +25,42 @@ type Payload struct {
 	Id int `json:"id"`
 }
 
+type Stat struct {
+	sync.RWMutex
+	total   int
+	failure int
+	error   int
+}
+
 type Worker struct {
 	Addr string
 
-	mux      *http.ServeMux
-	listener net.Listener
-	server   *http.Server
+	failureRate int
+	mux         *http.ServeMux
+	listener    net.Listener
+	server      *http.Server
 
 	results chan int
+	Stat    *Stat
 }
 
-func New() (*Worker, error) {
+func New(failureRate int) (*Worker, error) {
 	listener, err := net.Listen("tcp4", "0.0.0.0:0")
 	if err != nil {
 		return nil, err
 	}
 
 	return &Worker{
-		Addr:     listener.Addr().String(),
-		listener: listener,
-		mux:      http.NewServeMux(),
-		results:  make(chan int, 0),
+		Addr:        listener.Addr().String(),
+		failureRate: failureRate,
+		listener:    listener,
+		mux:         http.NewServeMux(),
+		results:     make(chan int, 0),
+		Stat:        &Stat{},
 	}, nil
 }
 
 func (worker *Worker) Start() error {
-	log.Printf("Start worker: %s", worker.Addr)
 	s := &http.Server{
 		Handler: worker,
 	}
@@ -62,7 +73,7 @@ func (worker *Worker) Stop(ctx context.Context) error {
 	return worker.server.Shutdown(ctx)
 }
 
-func (worker *Worker) ArrivedJobs() chan int {
+func (worker *Worker) SucceededJobs() chan int {
 	return worker.results
 }
 
@@ -73,12 +84,16 @@ func (worker *Worker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	var payload Payload
 	if err := d.Decode(&payload); err != nil {
 		log.Print(err)
+		worker.Stat.ErrorOccurred()
 		result.Status = StatusFailure
 		result.Message = err.Error()
 		goto WriteResponse
 	}
 
-	if r := rand.Intn(100); r < 10 {
+	worker.Stat.ArriveJob()
+
+	if r := rand.Intn(100); r < worker.failureRate {
+		worker.Stat.Fail()
 		result.Status = StatusFailure
 		result.Message = "random failure"
 		goto WriteResponse
@@ -95,4 +110,40 @@ WriteResponse:
 		log.Print(err)
 		return
 	}
+}
+
+func (s *Stat) Total() int {
+	s.RLock()
+	defer s.RUnlock()
+	return s.total
+}
+
+func (s *Stat) Failure() int {
+	s.RLock()
+	defer s.RUnlock()
+	return s.failure
+}
+
+func (s *Stat) Error() int {
+	s.RLock()
+	defer s.RUnlock()
+	return s.failure
+}
+
+func (s *Stat) ArriveJob() {
+	s.Lock()
+	defer s.Unlock()
+	s.total++
+}
+
+func (s *Stat) Fail() {
+	s.Lock()
+	defer s.Unlock()
+	s.failure++
+}
+
+func (s *Stat) ErrorOccurred() {
+	s.Lock()
+	defer s.Unlock()
+	s.error++
 }

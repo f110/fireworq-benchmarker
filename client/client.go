@@ -36,11 +36,12 @@ type Routing struct {
 	JobCategory string `json:"job_category,omitempty"`
 }
 
-func New(host string) *Client {
+func New(host string, concurrent int) *Client {
 	u, err := url.Parse(fmt.Sprintf("http://%s", host))
 	if err != nil {
 		return nil
 	}
+	http.DefaultTransport.(*http.Transport).MaxIdleConnsPerHost = concurrent
 
 	return &Client{Host: host, url: u}
 }
